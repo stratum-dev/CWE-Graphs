@@ -1,75 +1,81 @@
 #!/usr/bin/env python3
-"""Render every .dot under <out_dir> with Graphviz.
+"""Render every .dot under <out_dir> with pygraphviz.
 
 Usage:
     python -I render_graphs.py <out_dir> [--png-all] [--sfdp]
+
+PyGraphviz 2.0+ wheels bundle the Graphviz libraries and layout plugins
+(dot, neato, sfdp, fdp, ...), so no system Graphviz installation and no
+external `dot`/`sfdp` executables are required. Install with:
+
+    python -m pip install -r requirements.txt
 
 SVG is produced for every graph. PNG is produced for the overview, the
 per-pillar graphs and the smaller graphs (the layered complete graph is too
 large for a useful PNG). Pass --png-all to force PNG for everything.
 
 Pass --sfdp to additionally render a compact force-directed variant of the
-complete DAG (slow: roughly 1-2 minutes per version).
+complete DAG (slow: roughly 1-3 minutes per version).
 """
 import os
-import subprocess
 import sys
 import time
+
+try:
+    import pygraphviz as pgv
+except ImportError:
+    sys.exit("pygraphviz is required: python -m pip install -r requirements.txt")
 
 SKIP_PNG = {"cwe-dag-full.dot"}
 
 
 def check_sfdp():
-    """Fail early with a useful message if the neato layout plugin is missing.
-
-    `sfdp -V` only prints the version and does not load a layout engine, so
-    the check has to render a tiny graph.
-    """
+    """Fail early if the bundled Graphviz has no sfdp layout engine."""
+    graph = pgv.AGraph()
+    graph.add_edge("a", "b")
     try:
-        result = subprocess.run(
-            ["sfdp", "-Tsvg", "-o", os.devnull],
-            input=b"digraph { a -> b }",
-            capture_output=True,
-        )
-    except FileNotFoundError:
-        sys.exit("sfdp was not found. Install Graphviz with its layout plugins "
-                 "(on Debian/Ubuntu: graphviz + libgvplugin-neato-layout*).")
-    if result.returncode:
-        detail = result.stderr.decode(errors="replace").strip()
-        sys.exit("sfdp is not usable; the Graphviz neato layout plugin is probably "
-                 "missing (on Debian/Ubuntu: apt install libgvplugin-neato-layout*). "
-                 "If `dot -P` lists only 'dot', run `sudo dot -c` to register the "
-                 "layout plugins.\n" + detail)
+        graph.layout(prog="sfdp")
+    except Exception as exc:
+        sys.exit("sfdp layout is not available in this pygraphviz build: "
+                 f"{exc}\nReinstall pygraphviz from a binary wheel "
+                 "(python -m pip install --force-reinstall -r requirements.txt).")
 
 
-def render_sfdp(dot, stem):
-    """Render the force-directed SVG/PNG, retrying without overlap removal.
+def draw_layered(dot, stem, png):
+    graph = pgv.AGraph(dot)
+    graph.layout(prog="dot")
+    graph.draw(stem + ".svg", format="svg")
+    if png:
+        graph.graph_attr["dpi"] = "110"
+        graph.draw(stem + ".png", format="png")
 
-    Some Ubuntu builds compile Graphviz without GTS, so `-Goverlap=false`
-    fails with "not built with triangulation library" while the plain sfdp
-    layout still works. In that case fall back to no overlap removal.
+
+def draw_force_directed(dot, stem):
+    """Render sfdp SVG/PNG, retrying without overlap removal.
+
+    Some Graphviz builds lack GTS; `overlap=false` then fails while a plain
+    sfdp layout still works. Each attempt starts from a fresh graph because
+    layout mutates node positions.
     """
     attempts = [
-        ["-Goverlap=false", "-Gsplines=true"],
-        ["-Gsplines=true"],
-        [],
+        {"overlap": "false", "splines": "true"},
+        {"splines": "true"},
+        {},
     ]
-    last_error = ""
-    for extra in attempts:
-        svg = subprocess.run(
-            ["sfdp", "-Tsvg", *extra, "-o", stem + "-sfdp.svg", dot],
-            capture_output=True, text=True)
-        if svg.returncode:
-            last_error = svg.stderr
-            continue
-        png = subprocess.run(
-            ["sfdp", "-Tpng", "-Gdpi=96", *extra, "-o", stem + "-sfdp.png", dot],
-            capture_output=True, text=True)
-        if png.returncode:
-            last_error = png.stderr
-            continue
-        return extra
-    sys.exit("sfdp failed with every overlap setting:\n" + last_error.strip())
+    last_error = None
+    for attrs in attempts:
+        graph = pgv.AGraph(dot)
+        for key, value in attrs.items():
+            graph.graph_attr[key] = value
+        try:
+            graph.layout(prog="sfdp")
+            graph.draw(stem + "-sfdp.svg", format="svg")
+            graph.graph_attr["dpi"] = "96"
+            graph.draw(stem + "-sfdp.png", format="png")
+            return
+        except Exception as exc:  # try the next overlap setting
+            last_error = exc
+    sys.exit(f"sfdp rendering failed for {dot}: {last_error}")
 
 
 def main():
@@ -80,25 +86,25 @@ def main():
     with_sfdp = "--sfdp" in sys.argv
     if with_sfdp:
         check_sfdp()
+
     dots = []
     for base, _dirs, files in os.walk(out_dir):
-        for f in sorted(files):
-            if f.endswith(".dot"):
-                dots.append(os.path.join(base, f))
+        for name in sorted(files):
+            if name.endswith(".dot"):
+                dots.append(os.path.join(base, name))
+
     for dot in dots:
         stem = dot[:-4]
         t0 = time.time()
-        subprocess.run(["dot", "-Tsvg", "-o", stem + ".svg", dot], check=True)
+        png = png_all or os.path.basename(dot) not in SKIP_PNG
+        draw_layered(dot, stem, png)
         print(f"SVG  {os.path.relpath(stem + '.svg', out_dir)}  ({time.time() - t0:.1f}s)")
-        if png_all or os.path.basename(dot) not in SKIP_PNG:
-            t0 = time.time()
-            subprocess.run(["dot", "-Tpng", "-Gdpi=110", "-o", stem + ".png", dot], check=True)
-            print(f"PNG  {os.path.relpath(stem + '.png', out_dir)}  ({time.time() - t0:.1f}s)")
+        if png:
+            print(f"PNG  {os.path.relpath(stem + '.png', out_dir)}")
+
         if with_sfdp and os.path.basename(dot) == "cwe-dag-full.dot":
-            # Compact force-directed variant: shows the overall shape of the
-            # DAG in one poster-sized image (direction is not preserved).
             t0 = time.time()
-            render_sfdp(dot, stem)
+            draw_force_directed(dot, stem)
             print(f"SFDP {os.path.relpath(stem + '-sfdp.svg', out_dir)}  ({time.time() - t0:.1f}s)")
 
 

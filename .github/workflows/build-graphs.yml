@@ -13,9 +13,79 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  build:
+  setup:
     runs-on: ubuntu-latest
-    timeout-minutes: 180
+    outputs:
+      versions: ${{ steps.versions.outputs.versions }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: List catalogs
+        id: versions
+        run: echo "versions=$(python -I scripts/fetch_cwe.py --list)" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: setup
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        version: ${{ fromJson(needs.setup.outputs.versions) }}
+    name: build (${{ matrix.version }})
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Install Python dependencies
+        run: python -m pip install -r requirements.txt
+
+      - name: Verify pygraphviz and sfdp
+        run: |
+          python - <<'PY'
+          import pygraphviz as pgv
+          g = pgv.AGraph()
+          g.add_edge("a", "b")
+          g.layout(prog="sfdp")
+          g.draw("/tmp/sfdp-check.svg", format="svg")
+          print("pygraphviz", pgv.__version__, "with sfdp OK")
+          PY
+
+      - name: Fetch CWE ${{ matrix.version }}
+        run: python -I scripts/fetch_cwe.py --versions ${{ matrix.version }}
+
+      - name: Build CWE ${{ matrix.version }}
+        run: python -I scripts/build_all.py --only ${{ matrix.version }} --offline
+
+      - name: Remove shared index before upload
+        run: rm -f out/index.html
+
+      - name: Upload version build
+        uses: actions/upload-artifact@v4
+        with:
+          name: out-${{ matrix.version }}
+          path: out
+          if-no-files-found: error
+          overwrite: true
+          retention-days: 7
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
 
     steps:
       - name: Check out repository
@@ -26,57 +96,22 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install Graphviz
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --install-recommends graphviz
+      - name: Download all version builds
+        uses: actions/download-artifact@v4
+        with:
+          pattern: out-*
+          path: out
+          merge-multiple: true
 
-          # The runner image may only pull the dot layout plugin. sfdp/neato/fdp
-          # live in the neato layout plugin packages, so install the versioned
-          # layout plugin packages explicitly when the distro splits them out.
-          plugins=$(apt-cache search --names-only '^libgvplugin-.*-layout[0-9]+$' | awk '{print $1}')
-          if [ -n "$plugins" ]; then
-            sudo apt-get install -y $plugins
-          fi
-
-          # Ubuntu's package does not always run `dot -c` in postinst, so the
-          # layout engines exist but are not registered. This is the usual
-          # cause of: There is no layout engine support for "sfdp".
-          sudo dot -c
-          dot -P
-
-          which -a dot sfdp || true
-          dot -V
-          sfdp -V
-
-          # If the binary cannot find its plugin directory, point Graphviz at
-          # the directory that contains libgvplugin_neato_layout.
-          if ! echo 'digraph { a -> b }' | sfdp -Tsvg > /dev/null 2>&1; then
-            for d in /usr/lib/*/graphviz /usr/lib/graphviz /usr/local/lib/graphviz; do
-              if ls "$d"/libgvplugin_neato_layout* > /dev/null 2>&1; then
-                export GVBINDIR="$d"
-                echo "GVBINDIR=$d" >> "$GITHUB_ENV"
-                echo "Using GVBINDIR=$d"
-                break
-              fi
-            done
-          fi
-
-          echo 'digraph { a -> b }' | sfdp -Tsvg > /dev/null
-          echo 'sfdp layout engine OK'
-
-      - name: Fetch CWE catalogs from MITRE
-        run: python -I scripts/fetch_cwe.py --versions all
-
-      - name: Build all graphs
-        run: python -I scripts/build_all.py --offline
+      - name: Rebuild indexes
+        run: python -I scripts/make_index.py out
 
       - name: Package release
         run: |
           mkdir -p dist/cwe-graphs
           cp -r out dist/cwe-graphs/out
           cp -r scripts dist/cwe-graphs/scripts
-          cp README.md README.zh-CN.md dist/cwe-graphs/
+          cp README.md README.zh-CN.md requirements.txt dist/cwe-graphs/
           find dist/cwe-graphs -type d -name __pycache__ -prune -exec rm -rf {} +
           find dist/cwe-graphs -type f -name '*.pyc' -delete
 
@@ -86,7 +121,6 @@ jobs:
             echo "ref: ${GITHUB_REF_NAME}"
             echo "run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
             echo "built: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
-            echo "graphviz: $(dot -V 2>&1)"
             echo "versions: $(ls out | grep '^v' | sed 's/^v//' | sort -V | tr '\n' ' ')"
           } > dist/cwe-graphs/BUILD.txt
 

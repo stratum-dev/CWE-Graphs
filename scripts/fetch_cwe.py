@@ -2,7 +2,9 @@
 """Download CWE catalog XML from MITRE over the network.
 
 Usage:
-    python -I fetch_cwe.py [--out DIR] [--versions SPEC] [--force] [--quiet]
+    python -I fetch_cwe.py [--out DIR] [--versions SPEC] [--force] [--quiet] [--list]
+
+--list prints the resolved version list as JSON and exits (used by CI).
 
 SPEC:
     all            every known catalog: 4.0 ... 4.21, 5.0   (default)
@@ -17,6 +19,7 @@ and stored as
 
 Existing XML files are skipped unless --force is given.
 """
+import json
 import os
 import shutil
 import sys
@@ -138,6 +141,10 @@ def main():
     quiet = "--quiet" in args
 
     versions = resolve_versions(spec)
+    if "--list" in args:
+        print(json.dumps(versions))
+        return 0
+
     os.makedirs(out_dir, exist_ok=True)
     print(f"Fetching {len(versions)} CWE catalog(s) into {os.path.relpath(out_dir, ROOT)}"
           f"{' (force)' if force else ''}")

@@ -2,7 +2,7 @@
 
 **English** | [简体中文](README.zh-CN.md)
 
-Parses every entry in each MITRE CWE catalog from 4.0 through 5.0 into a directed acyclic graph and renders it with Graphviz. **Each version has its own directory** with a complete DAG, per-pillar subgraphs, and machine-readable node/edge data.
+Parses every entry in each MITRE CWE catalog from 4.0 through 5.0 into a directed acyclic graph and renders it with Graphviz through pygraphviz. **Each version has its own directory** with a complete DAG, per-pillar subgraphs, and machine-readable node/edge data.
 
 This subproject was originally developed for the research paper *SIGMA: Semantic Imbalance-Guided Matching with Adaptive Retrieval for Vulnerability Detection*. It provides a visual knowledge graph of the CWE taxonomy to facilitate the analysis of hierarchical structures and semantic relationships among CWE weaknesses.
 
@@ -116,11 +116,12 @@ cwe-graphs/
     pillars/*.dot|.svg|.png
     cwe_nodes.csv  cwe_edges.csv  cwe_edges_all_views.csv
     cwe_grouping_members.csv  cwe_stats.json  pillars_index.json
+  requirements.txt                            pygraphviz (bundles Graphviz)
   scripts/fetch_cwe.py                        online catalog downloader
   scripts/build_cwe_dag.py                    one catalog -> graphs + data
   scripts/render_graphs.py                    render a version directory
   scripts/make_index.py                       HTML indexes
-  scripts/build_all.py                        loop over all versions
+  scripts/build_all.py                        parallel build over all versions
 ```
 
 ### Per-version files
@@ -167,17 +168,20 @@ Files are written to `data/v<version>/cwec_v<version>.xml` (the zip is kept as a
 
 ## Reproducing
 
-Requirements: Python 3.9+ (standard library only) and Graphviz (`dot` and `sfdp`; tested with 15.1.0).
+Requirements: Python 3.10+ and [pygraphviz](https://pygraphviz.github.io/) 2.0.4. The PyPI wheels bundle Graphviz and its layout plugins (including `sfdp`), so no separate Graphviz installation is needed.
 
 ```bash
 cd cwe-graphs
-python -I scripts/build_all.py                  # fetch missing catalogs, then build all
+python -m pip install -r requirements.txt
+python -I scripts/build_all.py                  # fetch missing catalogs, build all in parallel
+python -I scripts/build_all.py --jobs 8         # more parallel workers (default: min(4, CPU))
+python -I scripts/build_all.py --jobs 1         # sequential (old behavior)
 python -I scripts/build_all.py --only 5.0       # one version
 python -I scripts/build_all.py --offline        # use local data only, no network
 python -I scripts/build_all.py --no-sfdp        # skip force-directed posters (faster)
 ```
 
-`build_all.py` calls the fetcher automatically for the selected versions, then builds `out/v<version>/`. To add a future release, run `fetch_cwe.py --versions <new-version>` or pass it to `build_all.py --only <new-version>`; the downloader will pick it up.
+`build_all.py` calls the fetcher automatically for the selected versions, then builds `out/v<version>/` with a worker pool. The GitHub workflow goes further and runs one matrix job per version, so CI wall time is a few minutes instead of the serial sum. To add a future release, run `fetch_cwe.py --versions <new-version>` or pass it to `build_all.py --only <new-version>`; the downloader will pick it up.
 
 Manual single-version run:
 
@@ -187,6 +191,4 @@ python -I scripts/render_graphs.py out/v5.0
 python -I scripts/make_index.py out
 ```
 
-> Note: `dot` takes 1–4 seconds per graph; `sfdp` takes roughly 1–2 minutes per version, so a full 23-version build is about 30–45 minutes. Pass `--no-sfdp` for a fast build with only the layered graphs.
-
-> Linux note: if `sfdp` reports `There is no layout engine support for "sfdp"`, run `sudo dot -c` to register Graphviz plugins (some distro packages skip this in postinst). If overlap removal complains about a missing triangulation library, the renderer automatically retries without `-Goverlap=false`.
+> Note: layout is in-process through pygraphviz. `dot` takes 1–4 seconds per graph and `sfdp` roughly 30–120 seconds per version, so a full local build with four workers is about 10–20 minutes; the CI matrix usually finishes in 5–8 minutes. Use `--jobs 1` for a serial run and `--no-sfdp` to skip the force-directed posters. If the bundled Graphviz lacks overlap removal, the renderer retries without `overlap=false`.

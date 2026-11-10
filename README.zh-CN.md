@@ -2,7 +2,7 @@
 
 [English](README.md) | **简体中文**
 
-把 MITRE 官方 CWE 4.0 到 5.0 的每个版本全部解析成有向无环图，并用 Graphviz 渲染。**每个版本一个独立子目录**，各自包含完整 DAG、按 Pillar 拆分的子图，以及机器可读的节点/边数据。
+把 MITRE 官方 CWE 4.0 到 5.0 的每个版本全部解析成有向无环图，并通过 pygraphviz 用 Graphviz 渲染。**每个版本一个独立子目录**，各自包含完整 DAG、按 Pillar 拆分的子图，以及机器可读的节点/边数据。
 
 本子项目最初为研究论文 **SIGMA: Semantic Imbalance-Guided Matching with Adaptive Retrieval for Vulnerability Detection** 开发，旨在通过可视化图谱展示 CWE 体系的层级结构及语义关联，辅助研究人员分析 CWE 弱点类别之间的结构关系与语义特征。
 
@@ -116,11 +116,12 @@ cwe-graphs/
     pillars/*.dot|.svg|.png
     cwe_nodes.csv  cwe_edges.csv  cwe_edges_all_views.csv
     cwe_grouping_members.csv  cwe_stats.json  pillars_index.json
+  requirements.txt                            pygraphviz（自带 Graphviz）
   scripts/fetch_cwe.py                        在线下载器
   scripts/build_cwe_dag.py                    单个目录 -> 图 + 数据
   scripts/render_graphs.py                    渲染一个版本目录
   scripts/make_index.py                       生成 HTML 索引
-  scripts/build_all.py                        遍历所有版本
+  scripts/build_all.py                        并行构建所有版本
 ```
 
 ### 每个版本内的文件
@@ -167,17 +168,20 @@ python -I scripts/fetch_cwe.py --versions 5.0 --force  # 强制重新下载
 
 ## 复现
 
-依赖：Python 3.9+（仅标准库）、Graphviz（`dot` 和 `sfdp`，测试版本 15.1.0）。
+依赖：Python 3.10+ 和 [pygraphviz](https://pygraphviz.github.io/) 2.0.4。PyPI wheel 已捆绑 Graphviz 及布局插件（包括 `sfdp`），无需另外安装系统 Graphviz。
 
 ```bash
 cd cwe-graphs
-python -I scripts/build_all.py                  # 先在线补齐缺失版本，再全量构建
+python -m pip install -r requirements.txt
+python -I scripts/build_all.py                  # 先在线补齐缺失版本，再并行全量构建
+python -I scripts/build_all.py --jobs 8         # 增加并行数（默认 min(4, CPU)）
+python -I scripts/build_all.py --jobs 1         # 串行构建（旧行为）
 python -I scripts/build_all.py --only 5.0       # 只构建一个版本
 python -I scripts/build_all.py --offline        # 只用本地数据，不联网
 python -I scripts/build_all.py --no-sfdp        # 跳过力导向总览（更快）
 ```
 
-`build_all.py` 会先为所选版本调用下载器，再生成 `out/v<version>/`。将来 MITRE 发布新版本时，运行 `fetch_cwe.py --versions <新版本>`，或直接 `build_all.py --only <新版本>`，下载器会自动获取。
+`build_all.py` 会先为所选版本调用下载器，再用工作线程池并行生成 `out/v<version>/`。GitHub workflow 进一步采用每个版本一个 matrix job，CI 的实际耗时通常只需几分钟，而不是串行总和。将来 MITRE 发布新版本时，运行 `fetch_cwe.py --versions <新版本>`，或直接 `build_all.py --only <新版本>`，下载器会自动获取。
 
 手动构建单个版本：
 
@@ -187,6 +191,4 @@ python -I scripts/render_graphs.py out/v5.0
 python -I scripts/make_index.py out
 ```
 
-> 说明：`dot` 每个图约 1–4 秒；`sfdp` 每个版本约 1–2 分钟，因此 23 个版本全量构建约需 30–45 分钟。只想要分层图时加 `--no-sfdp`。
-
-> Linux 提示：如果 `sfdp` 报 `There is no layout engine support for "sfdp"`，运行 `sudo dot -c` 注册 Graphviz 插件（部分发行版安装后不会自动执行）。如果重叠消除提示缺少三角剖分库，渲染器会自动去掉 `-Goverlap=false` 重试。
+> 说明：布局通过 pygraphviz 在进程内完成。`dot` 每个图约 1–4 秒；`sfdp` 每个版本约 30–120 秒。默认 4 个并行 worker 时本地全量构建约 10–20 分钟，CI matrix 通常 5–8 分钟。`--jobs 1` 可恢复串行；`--no-sfdp` 可跳过力导向图。如果捆绑的 Graphviz 不支持重叠消除，渲染器会自动去掉 `overlap=false` 重试。
