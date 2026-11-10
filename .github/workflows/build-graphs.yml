@@ -2,7 +2,7 @@ name: Build CWE graphs
 
 on:
   push:
-    branches: [master]
+    branches: [main, master]
   workflow_dispatch:
 
 permissions:
@@ -29,9 +29,41 @@ jobs:
       - name: Install Graphviz
         run: |
           sudo apt-get update
-          sudo apt-get install -y graphviz
+          sudo apt-get install -y --install-recommends graphviz
+
+          # The runner image may only pull the dot layout plugin. sfdp/neato/fdp
+          # live in the neato layout plugin packages, so install the versioned
+          # layout plugin packages explicitly when the distro splits them out.
+          plugins=$(apt-cache search --names-only '^libgvplugin-.*-layout[0-9]+$' | awk '{print $1}')
+          if [ -n "$plugins" ]; then
+            sudo apt-get install -y $plugins
+          fi
+
+          # Ubuntu's package does not always run `dot -c` in postinst, so the
+          # layout engines exist but are not registered. This is the usual
+          # cause of: There is no layout engine support for "sfdp".
+          sudo dot -c
+          dot -P
+
+          which -a dot sfdp || true
           dot -V
           sfdp -V
+
+          # If the binary cannot find its plugin directory, point Graphviz at
+          # the directory that contains libgvplugin_neato_layout.
+          if ! echo 'digraph { a -> b }' | sfdp -Tsvg > /dev/null 2>&1; then
+            for d in /usr/lib/*/graphviz /usr/lib/graphviz /usr/local/lib/graphviz; do
+              if ls "$d"/libgvplugin_neato_layout* > /dev/null 2>&1; then
+                export GVBINDIR="$d"
+                echo "GVBINDIR=$d" >> "$GITHUB_ENV"
+                echo "Using GVBINDIR=$d"
+                break
+              fi
+            done
+          fi
+
+          echo 'digraph { a -> b }' | sfdp -Tsvg > /dev/null
+          echo 'sfdp layout engine OK'
 
       - name: Fetch CWE catalogs from MITRE
         run: python -I scripts/fetch_cwe.py --versions all

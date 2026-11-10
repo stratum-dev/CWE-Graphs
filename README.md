@@ -188,3 +188,5 @@ python -I scripts/make_index.py out
 ```
 
 > Note: `dot` takes 1–4 seconds per graph; `sfdp` takes roughly 1–2 minutes per version, so a full 23-version build is about 30–45 minutes. Pass `--no-sfdp` for a fast build with only the layered graphs.
+
+> Linux note: if `sfdp` reports `There is no layout engine support for "sfdp"`, run `sudo dot -c` to register Graphviz plugins (some distro packages skip this in postinst). If overlap removal complains about a missing triangulation library, the renderer automatically retries without `-Goverlap=false`.

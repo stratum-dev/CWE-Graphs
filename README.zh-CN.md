@@ -188,3 +188,5 @@ python -I scripts/make_index.py out
 ```
 
 > 说明：`dot` 每个图约 1–4 秒；`sfdp` 每个版本约 1–2 分钟，因此 23 个版本全量构建约需 30–45 分钟。只想要分层图时加 `--no-sfdp`。
+
+> Linux 提示：如果 `sfdp` 报 `There is no layout engine support for "sfdp"`，运行 `sudo dot -c` 注册 Graphviz 插件（部分发行版安装后不会自动执行）。如果重叠消除提示缺少三角剖分库，渲染器会自动去掉 `-Goverlap=false` 重试。
