@@ -1,0 +1,81 @@
+name: Build CWE graphs
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: cwe-graphs-release
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Graphviz
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y graphviz
+          dot -V
+          sfdp -V
+
+      - name: Fetch CWE catalogs from MITRE
+        run: python -I scripts/fetch_cwe.py --versions all
+
+      - name: Build all graphs
+        run: python -I scripts/build_all.py --offline
+
+      - name: Package release
+        run: |
+          mkdir -p dist/cwe-graphs
+          cp -r out dist/cwe-graphs/out
+          cp -r scripts dist/cwe-graphs/scripts
+          cp README.md README.zh-CN.md dist/cwe-graphs/
+          find dist/cwe-graphs -type d -name __pycache__ -prune -exec rm -rf {} +
+          find dist/cwe-graphs -type f -name '*.pyc' -delete
+
+          {
+            echo "CWE graphs build"
+            echo "commit: ${GITHUB_SHA}"
+            echo "ref: ${GITHUB_REF_NAME}"
+            echo "run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+            echo "built: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            echo "graphviz: $(dot -V 2>&1)"
+            echo "versions: $(ls out | grep '^v' | sed 's/^v//' | sort -V | tr '\n' ' ')"
+          } > dist/cwe-graphs/BUILD.txt
+
+          cd dist
+          zip -9 -r ../cwe-graphs.zip cwe-graphs
+          cd ..
+          ls -lh cwe-graphs.zip
+
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: cwe-graphs-${{ github.run_number }}-${{ github.run_attempt }}
+          name: CWE graphs build ${{ github.run_number }}
+          body: |
+            Automated build from `${{ github.sha }}` on `${{ github.ref_name }}`.
+
+            - Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+            - Download `cwe-graphs.zip`, unzip it, then open `out/index.html`.
+
+            Includes every fetched catalog (CWE 4.0–4.21 and 5.0): complete
+            layered and force-directed DAGs, per-pillar subgraphs, and CSV/JSON data.
+          files: cwe-graphs.zip
+          make_latest: true
+          token: ${{ secrets.GITHUB_TOKEN }}

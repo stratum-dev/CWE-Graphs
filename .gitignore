@@ -1,0 +1,7 @@
+*.png
+*.zip
+__pycache__/
+*.pyc
+.pkg-test/
+out
+data
