@@ -24,6 +24,7 @@ Existing XML files are skipped unless --force is given.
 """
 import json
 import os
+import re
 import shutil
 import sys
 import tempfile
@@ -51,10 +52,9 @@ def resolve_versions(spec):
     spec = (spec or "all").strip()
     if spec == "all":
         versions = list(KNOWN_VERSIONS)
-    elif spec == "4.x":
-        versions = [v for v in KNOWN_VERSIONS if v.startswith("4.")]
-    elif spec == "5.x":
-        versions = [v for v in KNOWN_VERSIONS if v.startswith("5.")]
+    elif spec.endswith(".x") and spec[:-2].isdigit():
+        prefix = spec[:-2] + "."
+        versions = [v for v in KNOWN_VERSIONS if v.startswith(prefix)]
     else:
         versions = []
         for item in spec.split(","):
@@ -81,6 +81,28 @@ def download(url, dest, timeout=180):
             shutil.copyfileobj(response, fh)
 
 
+def parse_payload(payload):
+    """Parse catalog XML, repairing undeclared namespace prefixes.
+
+    CWE 2.11 uses <xhtml:div> without declaring xmlns:xhtml. The same repair
+    is used by build_cwe_dag.py; doing it here lets the downloader accept the
+    catalog instead of rejecting it before it reaches the tolerant builder.
+    """
+    try:
+        return ET.fromstring(payload)
+    except ET.ParseError:
+        text = payload.decode("utf-8-sig", errors="replace")
+        declared = set(re.findall(r"xmlns:([A-Za-z_][\w.-]*)\s*=", text))
+        used = set(re.findall(r"<([A-Za-z_][\w.-]*):", text))
+        missing = sorted(used - declared - {"xml", "xmlns"})
+        if not missing:
+            raise
+        additions = "".join(f' xmlns:{prefix}="urn:cwe:undeclared:{prefix}"'
+                            for prefix in missing)
+        text = re.sub(r"(<Weakness_Catalog\b)", r"\1" + additions, text, count=1)
+        return ET.fromstring(text)
+
+
 def extract_catalog(zip_path, out_dir, requested_version):
     with zipfile.ZipFile(zip_path) as archive:
         members = [n for n in archive.namelist()
@@ -90,11 +112,11 @@ def extract_catalog(zip_path, out_dir, requested_version):
         payload = archive.read(members[0])
 
     try:
-        root = ET.fromstring(payload)
+        root = parse_payload(payload)
     except ET.ParseError as exc:
         raise ValueError(f"downloaded file is not valid XML: {exc}")
 
-    detected = root.get("Version") or requested_version
+    detected = root.get("Version") or root.get("Catalog_Version") or requested_version
     if requested_version and detected != requested_version:
         raise ValueError(f"requested {requested_version}, but the archive contains CWE {detected}")
 
