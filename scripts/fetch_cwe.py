@@ -7,10 +7,13 @@ Usage:
 --list prints the resolved version list as JSON and exits (used by CI).
 
 SPEC:
-    all            every known catalog: 4.0 ... 4.21, 5.0   (default)
+    all            1.0 ... 5.0                              (default)
+    1.x            1.0 ... 1.13
+    2.x            2.0 ... 2.12
+    3.x            3.0 ... 3.4
     4.x            4.0 ... 4.21
     5.x            every known 5.x catalog (currently 5.0)
-    4.0,4.21,5.0   explicit comma-separated list
+    1.0,4.21,5.0   explicit comma-separated list
 
 Each catalog is downloaded from
     https://cwe.mitre.org/data/xml/cwec_v<version>.xml.zip
@@ -30,7 +33,13 @@ import zipfile
 import xml.etree.ElementTree as ET
 
 BASE_URL = "https://cwe.mitre.org/data/xml/cwec_v{version}.xml.zip"
-KNOWN_VERSIONS = [f"4.{i}" for i in range(0, 22)] + ["5.0"]
+KNOWN_VERSIONS = (
+    [f"1.{i}" for i in range(0, 14)]
+    + [f"2.{i}" for i in range(0, 13)]
+    + [f"3.{i}" for i in range(0, 5)]
+    + [f"4.{i}" for i in range(0, 22)]
+    + ["5.0"]
+)
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 

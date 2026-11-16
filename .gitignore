@@ -5,3 +5,6 @@ __pycache__/
 .pkg-test/
 out
 data
+!scripts/*.py
+!requirements.txt
+.vtest

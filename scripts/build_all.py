@@ -4,6 +4,7 @@
 Usage:
     python -I build_all.py [--only 4.0,4.21,5.0] [--jobs N] [--offline]
                            [--force-download] [--skip-render] [--no-sfdp]
+                           [--no-merge]
 
 By default, missing catalogs are fetched from MITRE over the network before
 building (see fetch_cwe.py). Pass --offline to use only local data, or
@@ -19,6 +20,9 @@ index.html per version are generated.
 Both complete-DAG layouts are produced by default: the layered `dot` graph
 (cwe-dag-full.svg) and the force-directed `sfdp` poster
 (cwe-dag-full-sfdp.svg/.png). Pass --no-sfdp to skip the slow sfdp pass.
+
+When all catalogs are built (no --only), the union "merged" view is generated
+in out/merged/ as well. Pass --no-merge to skip it.
 """
 import concurrent.futures
 import importlib.util
@@ -162,6 +166,17 @@ def main():
 
     if failures:
         sys.exit(f"\n{len(failures)} version(s) failed: {', '.join(failures)}")
+
+    if not only and "--no-merge" not in args:
+        print("\nMerging all catalogs into out/merged ...", flush=True)
+        cmd = [sys.executable, "-I", os.path.join(HERE, "merge_versions.py"),
+               "--data", os.path.join(ROOT, "data"),
+               "--out", os.path.join(out_root, "merged"), "--require-all"]
+        if skip_render:
+            cmd.append("--skip-render")
+        elif not with_sfdp:
+            cmd.append("--no-sfdp")
+        subprocess.run(cmd, check=True)
 
     subprocess.run([sys.executable, "-I", os.path.join(HERE, "make_index.py"), out_root],
                    check=True)

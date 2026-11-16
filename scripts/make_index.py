@@ -71,6 +71,10 @@ def version_index(vdir):
     dag = stats["canonical_dag"]
     version = src["cwe_version"]
     group_word = "Categories" if src.get("group_element") == "Category" else "Groupings"
+    merged = "merge" in stats
+    has_pillars = stats.get("abstraction", {}).get("Pillar", 0) > 0
+    subgraph_label = "Pillar" if has_pillars else "Top-level"
+    subgraph_root = "pillar" if has_pillars else "top-level root"
     has_layered = os.path.exists(os.path.join(vdir, "cwe-dag-full.svg"))
     has_sfdp = os.path.exists(os.path.join(vdir, "cwe-dag-full-sfdp.svg"))
 
@@ -133,6 +137,29 @@ def version_index(vdir):
       <p class="viewer-note">Also: <a href="cwe-dag-overview.svg">cwe-dag-overview.svg</a> (pillars + direct children).</p>
       {viewer_js}"""
 
+    if merged:
+        dag_note = ("Merged view: the union of every catalog. All ChildOf edges are shown "
+                    "uniformly; node metadata comes from the newest catalog containing the entry. "
+                    "Switch between the layered and force-directed layouts; open the SVG to zoom.")
+        merge_tile = (f'<div class="tile"><b>{stats["merge"]["version_count"]}</b>'
+                      '<span>Source catalogs</span></div>')
+        merge_note = ' Merge policy: <a href="MERGE.md">MERGE.md</a>.'
+        edge_all_row = (f'<tr><td><a href="cwe_edges_all_views.csv">cwe_edges_all_views.csv</a></td>'
+                        f'<td>{stats["all_childof_relations"]} ChildOf relations in the merged '
+                        'catalog (View 1000)</td></tr>')
+        edge_desc = (f'{dag["edges"]} ChildOf edges in the merged catalog '
+                     f'(View {esc(dag["view"])})')
+    else:
+        dag_note = ("Switch between the layered hierarchy (direction preserved) and the "
+                    "force-directed overview (compact, direction not preserved). The layered "
+                    "graph is large; open the SVG directly to zoom.")
+        merge_tile = ""
+        merge_note = ""
+        edge_all_row = (f'<tr><td><a href="cwe_edges_all_views.csv">cwe_edges_all_views.csv</a></td>'
+                        f'<td>{stats["all_childof_relations"]} ChildOf relations across all views, '
+                        'with View_ID</td></tr>')
+        edge_desc = f'{dag["edges"]} canonical ChildOf edges (View {esc(dag["view"])})' 
+
     page = f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -151,6 +178,7 @@ def version_index(vdir):
   <div class="tiles">
     <div class="tile"><b>{dag['nodes']}</b><span>Weaknesses</span></div>
     <div class="tile"><b>{dag['edges']}</b><span>ChildOf edges</span></div>
+    {merge_tile}
     <div class="tile"><b>{dag['cycles']}</b><span>Cycles (DAG)</span></div>
     <div class="tile"><b>{dag['roots']}</b><span>Roots</span></div>
     <div class="tile"><b>{dag['multi_parent_nodes']}</b><span>Multi-parent nodes</span></div>
@@ -160,13 +188,13 @@ def version_index(vdir):
 
   <section>
     <h2>Complete DAG <small>{dag['nodes']} nodes / {dag['edges']} edges</small></h2>
-    <p class="note">Switch between the layered hierarchy (direction preserved) and the force-directed overview (compact, direction not preserved). The layered graph is large; open the SVG directly to zoom.</p>
+    <p class="note">{dag_note}</p>
     {full_graph}
   </section>
 
   <section>
-    <h2>Pillar subgraphs <small>induced sub-DAGs rooted at each pillar</small></h2>
-    <p class="note">Shared nodes appear in several pillar subgraphs. Titles state how many cross-pillar parent links each subgraph omits; the complete graph has every edge.</p>
+    <h2>{subgraph_label} subgraphs <small>induced sub-DAGs rooted at each {subgraph_root}</small></h2>
+    <p class="note">Shared nodes appear in several {subgraph_label.lower()} subgraphs. Titles state how many cross-{subgraph_root} parent links each subgraph omits; the complete graph has every edge.</p>
     <div class="grid">{''.join(cards)}
     </div>
   </section>
@@ -175,12 +203,12 @@ def version_index(vdir):
     <h2>Other figures and data</h2>
     <p class="note">Deprecated/orphan entries: <a href="cwe-dag-deprecated.svg">cwe-dag-deprecated.svg</a> ·
     grouping containment: <a href="cwe-grouping-dag.svg">cwe-grouping-dag.svg</a> ·
-    legend: <a href="cwe-legend.svg">cwe-legend.svg</a>.</p>
+    legend: <a href="cwe-legend.svg">cwe-legend.svg</a>.{merge_note}</p>
     <table>
       <tr><th>File</th><th>Contents</th></tr>
       <tr><td><a href="cwe_nodes.csv">cwe_nodes.csv</a></td><td>{stats['entries']['total']} entries with depth, parents, root and subtree size</td></tr>
-      <tr><td><a href="cwe_edges.csv">cwe_edges.csv</a></td><td>{dag['edges']} canonical ChildOf edges (View {esc(dag['view'])})</td></tr>
-      <tr><td><a href="cwe_edges_all_views.csv">cwe_edges_all_views.csv</a></td><td>{stats['all_childof_relations']} ChildOf relations across all views, with View_ID</td></tr>
+      <tr><td><a href="cwe_edges.csv">cwe_edges.csv</a></td><td>{edge_desc}</td></tr>
+      {edge_all_row}
       <tr><td><a href="cwe_grouping_members.csv">cwe_grouping_members.csv</a></td><td>{stats['groupings']['membership_edges']} grouping membership relations</td></tr>
       <tr><td><a href="cwe_stats.json">cwe_stats.json</a></td><td>All statistics</td></tr>
       <tr><td><a href="pillars_index.json">pillars_index.json</a></td><td>Pillar subgraph index</td></tr>
@@ -219,6 +247,25 @@ def root_index(out_root):
             f"<td>{d['max_depth']}</td><td>{d['multi_parent_nodes']}</td>"
             f"<td>{s['entries']['groupings']} {g.lower()}</td>"
             f"<td><a href=\"{dirname}/cwe-dag-full.svg\">SVG</a></td></tr>")
+    merged_row = ""
+    merged_stats = os.path.join(out_root, "merged", "cwe_stats.json")
+    if os.path.exists(merged_stats):
+        ms = load(merged_stats)
+        md = ms["canonical_dag"]
+        merged_row = (
+            f'<tr style="background:#eef6fb"><td><a href="merged/index.html">'
+            f'{esc(ms["source"]["cwe_version"])}</a></td>'
+            f'<td>{esc(ms["source"]["release_date"])}</td>'
+            f'<td>{esc(md["view_name"])}</td>'
+            f'<td>{md["nodes"]}</td><td>{md["edges"]}</td><td>{md["roots"]}</td>'
+            f'<td>{md["max_depth"]}</td><td>{md["multi_parent_nodes"]}</td>'
+            f'<td>{ms["entries"]["groupings"]} groupings</td>'
+            f'<td><a href="merged/cwe-dag-full.svg">SVG</a></td></tr>')
+        merged_note = ('The highlighted row is the merged view: the union of all catalogs, '
+                       'with every relationship shown uniformly. ')
+    else:
+        merged_note = ""
+
     page = f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -230,17 +277,17 @@ def root_index(out_root):
 <body>
 <header>
   <h1>CWE Numbering Hierarchy as a DAG</h1>
-  <p>Every CWE 4.x catalog plus CWE 5.0, parsed from MITRE's official XML. Each version has its own directory with the complete DAG, per-pillar subgraphs and CSV data.</p>
+  <p>Every CWE catalog from 1.0 through 5.0, parsed from MITRE's official XML. Each version has its own directory with the complete DAG, subgraphs and CSV data.</p>
 </header>
 <main>
   <section>
     <h2>Versions <small>latest first</small></h2>
     <table>
       <tr><th>Version</th><th>Released</th><th>View 1000 name</th><th>Weaknesses</th><th>ChildOf edges</th><th>Roots</th><th>Depth</th><th>Multi-parent</th><th>Grouping layer</th><th>Full DAG</th></tr>
-      {''.join(rows)}
+      {merged_row}{''.join(rows)}
     </table>
   </section>
-  <p class="note">CWE 4.x uses <code>&lt;Category&gt;</code>; CWE 5.0 renamed the same layer to <code>&lt;Grouping&gt;</code>. Source archives: <code>data/v&lt;version&gt;/</code>. Build with <code>python -I scripts/build_all.py</code>.</p>
+  <p class="note">{merged_note}CWE 1.x–4.x use <code>&lt;Category&gt;</code>; CWE 5.0 renamed the same layer to <code>&lt;Grouping&gt;</code>. Source archives: <code>data/v&lt;version&gt;/</code>. Build with <code>python -I scripts/build_all.py</code>.</p>
   <footer>Data: MITRE CWE · rendered with Graphviz · see <code>README.md</code></footer>
 </main>
 </body>
@@ -256,7 +303,8 @@ def main():
     out_root = os.path.abspath(sys.argv[1])
     for name in sorted(os.listdir(out_root)):
         vdir = os.path.join(out_root, name)
-        if name.startswith("v") and os.path.exists(os.path.join(vdir, "cwe_stats.json")):
+        if (name.startswith("v") or name == "merged") and os.path.exists(
+                os.path.join(vdir, "cwe_stats.json")):
             version_index(vdir)
     root_index(out_root)
 

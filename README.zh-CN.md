@@ -1,8 +1,8 @@
-# CWE 编号体系 DAG（CWE 4.0 – 5.0）
+# CWE 编号体系 DAG（CWE 1.0 – 5.0）
 
 [English](README.md) | **简体中文**
 
-把 MITRE 官方 CWE 4.0 到 5.0 的每个版本全部解析成有向无环图，并通过 pygraphviz 用 Graphviz 渲染。**每个版本一个独立子目录**，各自包含完整 DAG、按 Pillar 拆分的子图，以及机器可读的节点/边数据。
+把 MITRE 官方 CWE 1.0 到 5.0 的每个版本全部解析成有向无环图，并通过 pygraphviz 用 Graphviz 渲染。**每个版本一个独立子目录**，各自包含完整 DAG、按 Pillar 拆分的子图，以及机器可读的节点/边数据。所有版本的并集视图生成在 `out/merged/`。
 
 本子项目最初为研究论文 **SIGMA: Semantic Imbalance-Guided Matching with Adaptive Retrieval for Vulnerability Detection** 开发，旨在通过可视化图谱展示 CWE 体系的层级结构及语义关联，辅助研究人员分析 CWE 弱点类别之间的结构关系与语义特征。
 
@@ -12,21 +12,31 @@
 
 **[cwe-graphs.zip — 最新 Release](https://github.com/stratum-dev/CWE-Graphs/releases/latest/download/cwe-graphs.zip)**
 
-解压后打开 `out/index.html`。包内包含所有版本、两种完整 DAG 布局、各 Pillar 子图，以及 CSV/JSON 数据。
+解压后打开 `out/index.html`。包内包含全部 55 个版本、两种完整 DAG 布局、各 Pillar/顶层子图，以及 CSV/JSON 数据。
 
 ## 数据来源
 
 | 项目 | 值 |
 | --- | --- |
 | 来源模式 | `https://cwe.mitre.org/data/xml/cwec_v<version>.xml.zip` |
-| 版本 | 4.0、4.1、…、4.21、5.0（共 23 个目录） |
+| 版本 | 1.0–1.13、2.0–2.12、3.0–3.4、4.0–4.21、5.0（共 55 个目录） |
 | 本地文件 | `data/v<version>/cwec_v<version>.xml`（同时保留 zip） |
-| Schema | CWE 4.x：schema 6/7，使用 `<Category>`；CWE 5.0：schema 8，使用 `<Grouping>` |
+| Schema | 1.x/2.x：schema v4/v5，使用 `<Relationship>`；3.x–4.x：schema 6/7，使用 `<Category>`；5.0：schema 8，使用 `<Grouping>` |
 | 规范层级 | 所有版本均为 View 1000 |
 
-CWE 5.0 把原来的 **Category** 层改名为 **Grouping**，脚本两者都支持。5.0 的 984 个 Weakness 中，956 个有效，28 个已弃用。
+CWE 1.x–4.x 使用 **Category**；5.0 把同一层改名为 **Grouping**。解析器兼容 schema v4/v5、6/7 和 8。55 个 catalog 的并集包含 988 个 Weakness 和 434 个 Grouping。
 
 ## 版本矩阵
+
+旧系列同样完整支持，产物结构一致：
+
+| 系列 | 版本 | Weakness（首 → 末） | XML 说明 |
+| --- | --- | --- | --- |
+| 1.x | 1.0–1.13 | 627 → 702 | schema v4/v5，使用 `<Relationship>` |
+| 2.x | 2.0–2.12 | 702 → 730 | schema v5；2.11 的 `xhtml` 前缀未声明（读取时自动修复） |
+| 3.x | 3.0–3.4 | 730 → 829 | schema v6，使用 `<Related_Weakness>` |
+
+4.x–5.0 明细：
 
 | 版本 | 发布日期 | Weakness | ChildOf 边 | 根 | 深度 | 多父节点 | Category/Grouping 层 | View 1000 名称 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -55,6 +65,24 @@ CWE 5.0 把原来的 **Category** 层改名为 **Grouping**，脚本两者都支
 | 5.0 | 2026-10-28 | 984 | 1106 | 38 | 5 | 152 | 431 | Complete Weakness Hierarchy |
 
 4.21 与 5.0 的 Weakness/边数相同；5.0 改变了 schema 命名空间，并把 category 改称 grouping。所有版本都是 DAG（0 环）。
+
+## 合并视图（4.0–5.0）
+
+`data/merged/cwec_merged.xml` 把 55 个 catalog 合并成一份 XML；`out/merged/` 是基于这份 XML 生成的图：
+
+- **988 个弱点 + 434 个 grouping**，覆盖 1.0–5.0 的全部 CWE 条目。
+- **1535 条 View 1000 `ChildOf` 关系**和 4778 条 grouping 成员关系，统一展示；没有版本标签，也没有历史边虚线。
+- 0 环，15 个根，387 个多父节点，最大深度 6。
+- 有 4 个条目只存在于旧版本：CWE-100（最后见于 1.5）、CWE-227/398/485（最后见于 2.9）。
+- 元数据（名称、抽象层级、状态、描述）取包含该条目的最新版本。
+
+打开 `out/merged/index.html` 查看分层/力导向切换；合并策略见 `out/merged/MERGE.md`。合并后的 XML 也复制到了 `out/merged/cwec_merged.xml`。
+
+```bash
+python -I scripts/merge_versions.py --require-all   # 生成 data/merged/cwec_merged.xml + out/merged/
+```
+
+完整运行 `build_all.py` 时会自动生成；加 `--no-merge` 可跳过。
 
 ## 图的结构（CWE 5.0，View 1000）
 
@@ -105,6 +133,8 @@ Grouping 是**组织层**，不属于弱点的父子层次，因此单独出图�
 cwe-graphs/
   data/v<version>/cwec_v<version>.xml(.zip)   原始 MITRE 数据
   out/index.html                              全版本矩阵
+  out/merged/                                 由合并 catalog 生成的图
+  data/merged/cwec_merged.xml                 合并后的 CWE XML（1.0-5.0）
   out/v<version>/                             每个版本的完整产物
     index.html
     cwe-dag-full.svg
@@ -122,6 +152,7 @@ cwe-graphs/
   scripts/render_graphs.py                    渲染一个版本目录
   scripts/make_index.py                       生成 HTML 索引
   scripts/build_all.py                        并行构建所有版本
+  scripts/merge_versions.py                   合并 catalog 为单个 XML + 总图
 ```
 
 ### 每个版本内的文件
@@ -179,9 +210,10 @@ python -I scripts/build_all.py --jobs 1         # 串行构建（旧行为）
 python -I scripts/build_all.py --only 5.0       # 只构建一个版本
 python -I scripts/build_all.py --offline        # 只用本地数据，不联网
 python -I scripts/build_all.py --no-sfdp        # 跳过力导向总览（更快）
+python -I scripts/merge_versions.py --require-all  # 合并总图（也会自动生成）
 ```
 
-`build_all.py` 会先为所选版本调用下载器，再用工作线程池并行生成 `out/v<version>/`。GitHub workflow 进一步采用每个版本一个 matrix job，CI 的实际耗时通常只需几分钟，而不是串行总和。将来 MITRE 发布新版本时，运行 `fetch_cwe.py --versions <新版本>`，或直接 `build_all.py --only <新版本>`，下载器会自动获取。
+`build_all.py` 会先为所选版本调用下载器，再用工作线程池并行生成 `out/v<version>/`。GitHub workflow 进一步采用每个版本一个 matrix job，并额外用一个 `merged` job 生成并集视图，CI 的实际耗时通常只需几分钟，而不是串行总和。将来 MITRE 发布新版本时，运行 `fetch_cwe.py --versions <新版本>`，或直接 `build_all.py --only <新版本>`，下载器会自动获取。
 
 手动构建单个版本：
 
@@ -191,4 +223,4 @@ python -I scripts/render_graphs.py out/v5.0
 python -I scripts/make_index.py out
 ```
 
-> 说明：布局通过 pygraphviz 在进程内完成。`dot` 每个图约 1–4 秒；`sfdp` 每个版本约 30–120 秒。默认 4 个并行 worker 时本地全量构建约 10–20 分钟，CI matrix 通常 5–8 分钟。`--jobs 1` 可恢复串行；`--no-sfdp` 可跳过力导向图。如果捆绑的 Graphviz 不支持重叠消除，渲染器会自动去掉 `overlap=false` 重试。
+> 说明：布局通过 pygraphviz 在进程内完成。`dot` 每个图约 1–4 秒；`sfdp` 每个版本约 30–120 秒。55 个版本用 4 个并行 worker 本地全量构建约 30–50 分钟；CI matrix（55 个 job，最多 20 并发）通常 10–15 分钟。`--jobs 1` 可恢复串行；`--no-sfdp` 可跳过力导向图。如果捆绑的 Graphviz 不支持重叠消除，渲染器会自动去掉 `overlap=false` 重试。

@@ -4,8 +4,8 @@
 Usage:
     python -I build_cwe_dag.py <cwec.xml> <out_dir>
 
-Works with every CWE 4.x catalog (schema 6/7, <Category>) and CWE 5.0
-(schema 8, <Grouping>).
+Works with every CWE catalog from 1.0 through 5.0: schema v4/v5
+(<Relationship>), schema 6/7 (<Category>) and schema 8 (<Grouping>).
 
 Outputs (in <out_dir>):
     cwe_nodes.csv              all weakness + category/grouping entries
@@ -42,8 +42,50 @@ def text_of(el, name):
     return ""
 
 
+def description_of(el):
+    """Description text from schema v4/v5 (nested) and v6+ (direct)."""
+    for ch in el:
+        if local(ch.tag) != "Description":
+            continue
+        for sub in ch.iter():
+            if local(sub.tag) == "Description_Summary":
+                return " ".join((sub.text or "").split())
+        return " ".join((ch.text or "").split())
+    return ""
+
+
+def summary_of(el):
+    summary = text_of(el, "Summary")
+    return " ".join(summary.split()) if summary else description_of(el)
+
+
+def old_relationships(el):
+    """Yield (view_id, nature, target_id, target_form) from schema v4/v5."""
+    for node in el.iter():
+        if local(node.tag) != "Relationship":
+            continue
+        nature = target = form = ""
+        views = []
+        for item in node.iter():
+            tag = local(item.tag)
+            if tag == "Relationship_Nature":
+                nature = (item.text or "").strip()
+            elif tag == "Relationship_Target_ID":
+                target = (item.text or "").strip()
+            elif tag == "Relationship_Target_Form":
+                form = (item.text or "").strip()
+            elif tag == "Relationship_View_ID":
+                views.append((item.text or "").strip())
+        for view in views:
+            yield view, nature, target, form
+
+
 def esc(text):
     return str(text).replace("\\", "\\\\").replace('"', '\\"')
+
+
+def dot_quote(text):
+    return str(text).replace('"', '\\"')
 
 
 def wrap(text, width=28):
@@ -70,12 +112,29 @@ def node_id(cwe_id):
     return "n" + str(cwe_id)
 
 
+def load_catalog_root(xml_path):
+    """Parse a catalog, repairing undeclared namespace prefixes.
+
+    CWE 2.11 uses <xhtml:div> without declaring xmlns:xhtml, so a strict
+    ElementTree parse fails. Any prefix used in a tag but not declared gets
+    a placeholder namespace declaration on the root element.
+    """
+    raw = open(xml_path, "rb").read().decode("utf-8-sig", errors="replace")
+    declared = set(re.findall(r"xmlns:([A-Za-z_][\w.-]*)\s*=", raw))
+    used = set(re.findall(r"<([A-Za-z_][\w.-]*):", raw))
+    missing = sorted(used - declared - {"xml", "xmlns"})
+    if missing:
+        additions = "".join(f' xmlns:{p}="urn:cwe:undeclared:{p}"' for p in missing)
+        raw = re.sub(r"(<Weakness_Catalog\b)", r"\1" + additions, raw, count=1)
+    return ET.fromstring(raw)
+
+
 def parse(xml_path):
-    root = ET.parse(xml_path).getroot()
+    root = load_catalog_root(xml_path)
     meta = {
-        "catalog": root.get("Name") or "CWE",
-        "version": root.get("Version") or "",
-        "date": root.get("Date") or "",
+        "catalog": root.get("Name") or root.get("Catalog_Name") or "CWE",
+        "version": root.get("Version") or root.get("Catalog_Version") or "",
+        "date": root.get("Date") or root.get("Catalog_Date") or "",
         "view_name": "",
         "group_element": "",
     }
@@ -87,18 +146,20 @@ def parse(xml_path):
     weaknesses, groupings = {}, {}
     for el in root.iter():
         tag = local(el.tag)
-        if tag == "Weakness":
+        if tag in ("Weakness", "Compound_Element"):
+            abstraction = (el.get("Abstraction") or el.get("Weakness_Abstraction")
+                           or el.get("Compound_Element_Abstraction") or "")
+            structure = (el.get("Structure") or el.get("Compound_Element_Structure") or "")
             weaknesses[el.get("ID")] = {
                 "id": el.get("ID"),
                 "kind": "weakness",
                 "name": el.get("Name") or "",
-                "abstraction": el.get("Abstraction") or "",
-                "structure": el.get("Structure") or "",
+                "abstraction": abstraction,
+                "structure": structure,
                 "status": el.get("Status") or "",
-                "description": text_of(el, "Description"),
+                "description": description_of(el),
             }
         elif tag in ("Category", "Grouping"):
-            # CWE 4.x uses <Category>; CWE 5.0 renamed it to <Grouping>.
             meta["group_element"] = tag
             groupings[el.get("ID")] = {
                 "id": el.get("ID"),
@@ -107,28 +168,55 @@ def parse(xml_path):
                 "abstraction": "Grouping",
                 "structure": "",
                 "status": el.get("Status") or "",
-                "description": text_of(el, "Summary"),
+                "description": summary_of(el),
             }
 
-    edges, all_edges = set(), []
+    edges, all_edges = set(), set()
     for el in root.iter():
-        if local(el.tag) != "Weakness":
+        if local(el.tag) not in ("Weakness", "Compound_Element"):
             continue
+        child = el.get("ID")
         for rw in el.iter():
-            if local(rw.tag) != "Related_Weakness" or rw.get("Nature") != "ChildOf":
+            if local(rw.tag) == "Related_Weakness" and rw.get("Nature") == "ChildOf":
+                view = rw.get("View_ID")
+                parent = rw.get("CWE_ID")
+                if view and parent:
+                    all_edges.add((child, parent, view))
+                    if view == CANONICAL_VIEW:
+                        edges.add((child, parent))
+        for view, nature, target, _form in old_relationships(el):
+            if not view or not target:
                 continue
-            child, parent, view = el.get("ID"), rw.get("CWE_ID"), rw.get("View_ID")
-            all_edges.append((child, parent, view))
-            if view == CANONICAL_VIEW:
-                edges.add((child, parent))
+            all_edges.add((child, target, view))
+            if view == CANONICAL_VIEW and nature == "ChildOf":
+                edges.add((child, target))
+
+    edges = {(c, p) for c, p in edges if c in weaknesses and p in weaknesses}
+    all_edges = sorted(all_edges, key=lambda r: (str(r[2]), int(r[1]), int(r[0])))
 
     memberships = set()
     for el in root.iter():
         if local(el.tag) not in ("Category", "Grouping"):
             continue
         for m in el.iter():
-            if local(m.tag) == "Has_Member":
-                memberships.add((el.get("ID"), m.get("CWE_ID")))
+            if local(m.tag) != "Has_Member" or not el.get("ID"):
+                continue
+            target = m.get("CWE_ID") or m.get("Target_CWE_ID")
+            if target and target.isdigit():
+                memberships.add((el.get("ID"), target))
+
+    # Schema v4/v5 has no Has_Member. Reconstruct category membership from
+    # View 699 ChildOf relationships: weakness/category -> parent category.
+    category_ids = set(groupings)
+    for el in root.iter():
+        if local(el.tag) not in ("Weakness", "Compound_Element", "Category", "Grouping"):
+            continue
+        child = el.get("ID")
+        if not child:
+            continue
+        for view, nature, target, _form in old_relationships(el):
+            if view == "699" and nature == "ChildOf" and target in category_ids:
+                memberships.add((target, child))
 
     return weaknesses, groupings, edges, all_edges, memberships, meta
 
@@ -215,7 +303,7 @@ def style_node(rec, depth=None):
         }
         fill, font = palette.get(rec["abstraction"], ('fillcolor="#FFFFFF"', 'fontcolor="#111111"'))
         attrs = f'shape=box, style="rounded,filled", {fill}, {font}, color="#4A6B82"'
-    label = wrap(f"CWE-{rec['id']} {rec['name']}")
+    label = dot_quote(wrap(f"CWE-{rec['id']} {rec['name']}"))
     return f'{node_id(rec["id"])} [label="{label}", {attrs}];'
 
 
@@ -322,6 +410,8 @@ def main():
     # one parent and can be reached from more than one pillar. The full graph
     # therefore has no clusters; the hierarchy is drawn as one DAG.
     pillars = [n for n in roots if weak[n]["abstraction"] == "Pillar"]
+    tops = pillars or roots
+    top_label = "pillars" if pillars else "top-level roots"
 
     down = {}
 
@@ -342,26 +432,26 @@ def main():
     for child, parent in sorted(edges, key=lambda e: (int(e[1]), int(e[0]))):
         lines.append(f'  {node_id(parent)} -> {node_id(child)};')
     write_dot(os.path.join(out_dir, "cwe-dag-full.dot"),
-              "CWE 5.0 complete weakness hierarchy (View 1000, ChildOf)",
+              f"CWE {meta['version']} complete weakness hierarchy (View 1000, ChildOf)",
               lines, f'label="CWE {meta["version"]} — {meta["view_name"]} (View 1000) — {len(weak)} weaknesses, {len(edges)} ChildOf edges, 0 cycles"; labelloc=t; fontsize=22; pack=true; packmode=array;')
 
-    # ---------- overview: pillars + direct children ----------
+    # ---------- overview: top-level entries + direct children ----------
     lines, seen = [], set()
-    for pil in pillars:
+    for pil in tops:
         for n in [pil] + children.get(pil, []):
             if n not in seen:
                 seen.add(n)
                 lines.append(style_node(weak[n]))
-    for pil in pillars:
+    for pil in tops:
         for ch in children.get(pil, []):
             lines.append(f'  {node_id(pil)} -> {node_id(ch)};')
     write_dot(os.path.join(out_dir, "cwe-dag-overview.dot"),
-              "CWE 5.0 pillars and direct children",
-              lines, f'label="CWE {meta["version"]} — 10 pillars and their direct children (border nodes are roots)"; labelloc=t; fontsize=20; ranksep=0.8; nodesep=0.12;')
+              f"CWE {meta['version']} {top_label} and direct children",
+              lines, f'label="CWE {meta["version"]} — {len(tops)} {top_label} and their direct children (border nodes are roots)"; labelloc=t; fontsize=20; ranksep=0.8; nodesep=0.12;')
 
-    # ---------- per-pillar induced sub-DAGs ----------
+    # ---------- per-top induced sub-DAGs ----------
     pillar_index = []
-    for pil in pillars:
+    for pil in tops:
         rel = {pil: 0}
         stack = [pil]
         while stack:
@@ -380,7 +470,7 @@ def main():
         fname = f"pillars/cwe-{pil}-{slug}.dot"
         title = (f"CWE-{pil} {weak[pil]['name']} — {len(members)} nodes, depth "
                  f"{max(rel.values())}, {len(local_edges)} ChildOf edges")
-        note = f"{external} cross-pillar parent link(s) omitted"
+        note = f"{external} cross-top parent link(s) omitted"
         write_dot(os.path.join(out_dir, fname),
                   title,
                   lines,
@@ -392,7 +482,7 @@ def main():
 
     # ---------- deprecated / orphan graph ----------
     reachable = set()
-    for pil in pillars:
+    for pil in tops:
         reachable |= reach(pil)
     members = set(weak) - reachable
     if members:
@@ -400,9 +490,11 @@ def main():
         for child, parent in sorted(edges, key=lambda e: (int(e[1]), int(e[0]))):
             if child in members and parent in members:
                 lines.append(f'  {node_id(parent)} -> {node_id(child)};')
-        write_dot(os.path.join(out_dir, "cwe-dag-deprecated.dot"),
-                  "Deprecated and orphan weakness entries",
-                  lines, 'label="Deprecated / orphan CWE entries (unreachable from any pillar)"; labelloc=t; fontsize=20;')
+    else:
+        lines = ['note [label="No deprecated or orphan entries", shape=plaintext, fontcolor="#66788A"];']
+    write_dot(os.path.join(out_dir, "cwe-dag-deprecated.dot"),
+              "Deprecated and orphan weakness entries",
+              lines, f'label="Deprecated / orphan CWE entries (unreachable from any {top_label})"; labelloc=t; fontsize=20;')
 
     # ---------- grouping containment DAG ----------
     # Groupings are organisational (formerly "categories"); they sit outside
@@ -415,14 +507,14 @@ def main():
     for g in sorted(participants, key=int):
         rec = groupings[g]
         n_mem = sum(1 for e in memberships if e[0] == g)
-        label = wrap(f"CWE-{g} {rec['name']}") + f"\\n[{n_mem} members]"
+        label = dot_quote(wrap(f"CWE-{g} {rec['name']}")) + f"\n[{n_mem} members]"
         lines.append(f'{node_id(g)} [label="{label}", shape=box, style="rounded,filled,dashed", '
                      'fillcolor="#F7E8B5", color="#B59A3C", fontcolor="#4A3B0A"];')
     for g, m in sorted(grouping_edges, key=lambda e: (int(e[0]), int(e[1]))):
         lines.append(f'  {node_id(g)} -> {node_id(m)};')
     write_dot(os.path.join(out_dir, "cwe-grouping-dag.dot"),
-              "CWE 5.0 grouping containment DAG",
-              lines, f'label="CWE 5.0 — groupings containing other groupings ({len(participants)} of {len(groupings)} groupings; the other {len(groupings) - len(participants)} are leaves shown in cwe_grouping_members.csv)"; labelloc=t; fontsize=20;')
+              f"CWE {meta['version']} grouping containment DAG",
+              lines, f'label="CWE {meta["version"]} — groupings containing other groupings ({len(participants)} of {len(groupings)} groupings; the other {len(groupings) - len(participants)} are leaves shown in cwe_grouping_members.csv)"; labelloc=t; fontsize=20;')
 
     # ---------- legend ----------
     legend = [

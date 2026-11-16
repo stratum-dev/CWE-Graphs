@@ -1,8 +1,8 @@
-# CWE Numbering Hierarchy as a DAG (CWE 4.0 – 5.0)
+# CWE Numbering Hierarchy as a DAG (CWE 1.0 – 5.0)
 
 **English** | [简体中文](README.zh-CN.md)
 
-Parses every entry in each MITRE CWE catalog from 4.0 through 5.0 into a directed acyclic graph and renders it with Graphviz through pygraphviz. **Each version has its own directory** with a complete DAG, per-pillar subgraphs, and machine-readable node/edge data.
+Parses every entry in each MITRE CWE catalog from 1.0 through 5.0 into a directed acyclic graph and renders it with Graphviz through pygraphviz. **Each version has its own directory** with a complete DAG, per-pillar subgraphs, and machine-readable node/edge data. A merged union view across every version is generated in `out/merged/`.
 
 This subproject was originally developed for the research paper *SIGMA: Semantic Imbalance-Guided Matching with Adaptive Retrieval for Vulnerability Detection*. It provides a visual knowledge graph of the CWE taxonomy to facilitate the analysis of hierarchical structures and semantic relationships among CWE weaknesses.
 
@@ -12,21 +12,31 @@ Open the `out/index.html` in browser for the version matrix and navigation. If y
 
 **[cwe-graphs.zip — latest release](https://github.com/stratum-dev/CWE-Graphs/releases/latest/download/cwe-graphs.zip)**
 
-Unzip it and open `out/index.html`. The package contains all versions, both complete-DAG layouts, per-pillar subgraphs, and the CSV/JSON data.
+Unzip it and open `out/index.html`. The package contains all 55 versions, both complete-DAG layouts, per-pillar/top-level subgraphs, and the CSV/JSON data.
 
 ## Data source
 
 | Item | Value |
 | --- | --- |
 | Source pattern | `https://cwe.mitre.org/data/xml/cwec_v<version>.xml.zip` |
-| Versions | 4.0, 4.1, …, 4.21, 5.0 (23 catalogs) |
+| Versions | 1.0–1.13, 2.0–2.12, 3.0–3.4, 4.0–4.21, 5.0 (55 catalogs) |
 | Local files | `data/v<version>/cwec_v<version>.xml` (zips kept alongside) |
-| Schemas | CWE 4.x: schema 6/7 with `<Category>`; CWE 5.0: schema 8 with `<Grouping>` |
+| Schemas | 1.x/2.x: schema v4/v5 with `<Relationship>`; 3.x–4.x: schema 6/7 with `<Category>`; 5.0: schema 8 with `<Grouping>` |
 | Canonical hierarchy | View 1000 in every version |
 
-CWE 5.0 renamed the old **Category** layer to **Grouping**; the parser accepts both. Of the 984 weaknesses in 5.0, 956 are active and 28 are deprecated.
+CWE 1.x–4.x use **Category**; 5.0 renamed the same layer to **Grouping**. The parser accepts schema v4/v5, 6/7 and 8. Across all 55 catalogs the union contains 988 weaknesses and 434 groupings.
 
 ## Version matrix
+
+Older series are fully supported and produce the same artifact set:
+
+| Series | Versions | Weaknesses (first → last) | XML notes |
+| --- | --- | --- | --- |
+| 1.x | 1.0–1.13 | 627 → 702 | schema v4/v5, `<Relationship>` entries |
+| 2.x | 2.0–2.12 | 702 → 730 | schema v5; 2.11 has an undeclared `xhtml` prefix (repaired on read) |
+| 3.x | 3.0–3.4 | 730 → 829 | schema v6, `<Related_Weakness>` |
+
+4.x–5.0 in detail:
 
 | Version | Released | Weaknesses | ChildOf edges | Roots | Depth | Multi-parent | Category/Grouping layer | View 1000 name |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -55,6 +65,24 @@ CWE 5.0 renamed the old **Category** layer to **Grouping**; the parser accepts b
 | 5.0 | 2026-10-28 | 984 | 1106 | 38 | 5 | 152 | 431 | Complete Weakness Hierarchy |
 
 4.21 and 5.0 carry the same weakness/edge counts; 5.0 changes the schema namespace and renames categories to groupings. Every version is a DAG (0 cycles).
+
+## Merged view (4.0–5.0)
+
+`data/merged/cwec_merged.xml` merges all 55 catalogs into a single catalog; `out/merged/` contains the graphs built from it:
+
+- **988 weaknesses and 434 groupings** — every CWE entry from 1.0 through 5.0.
+- **1535 View 1000 `ChildOf` relationships** and 4778 grouping memberships, treated uniformly. There are no per-version labels and no dashed historical edges.
+- 0 cycles, 15 roots, 387 multi-parent nodes, maximum depth 6.
+- Four entries exist only in older catalogs: CWE-100 (last seen in 1.5) and CWE-227/398/485 (last seen in 2.9).
+- Metadata (name, abstraction, status, description) comes from the newest catalog containing the entry.
+
+Open `out/merged/index.html` for the layered/force-directed tabs, or read `out/merged/MERGE.md`. The merged XML is copied into `out/merged/cwec_merged.xml` as well.
+
+```bash
+python -I scripts/merge_versions.py --require-all   # writes data/merged/cwec_merged.xml + out/merged/
+```
+
+A full `build_all.py` run generates it automatically; pass `--no-merge` to skip it.
 
 ## Graph structure (CWE 5.0, View 1000)
 
@@ -105,6 +133,8 @@ Node counts sum to more than 984 because shared nodes appear in several pillar s
 cwe-graphs/
   data/v<version>/cwec_v<version>.xml(.zip)   raw MITRE catalogs
   out/index.html                              all-version matrix
+  out/merged/                                 graphs built from the merged catalog
+  data/merged/cwec_merged.xml                 merged CWE XML (1.0-5.0)
   out/v<version>/                             one complete artifact set
     index.html
     cwe-dag-full.svg
@@ -122,6 +152,7 @@ cwe-graphs/
   scripts/render_graphs.py                    render a version directory
   scripts/make_index.py                       HTML indexes
   scripts/build_all.py                        parallel build over all versions
+  scripts/merge_versions.py                   merge catalogs into one XML + total graph
 ```
 
 ### Per-version files
@@ -179,9 +210,10 @@ python -I scripts/build_all.py --jobs 1         # sequential (old behavior)
 python -I scripts/build_all.py --only 5.0       # one version
 python -I scripts/build_all.py --offline        # use local data only, no network
 python -I scripts/build_all.py --no-sfdp        # skip force-directed posters (faster)
+python -I scripts/merge_versions.py --require-all  # merged union view (also automatic)
 ```
 
-`build_all.py` calls the fetcher automatically for the selected versions, then builds `out/v<version>/` with a worker pool. The GitHub workflow goes further and runs one matrix job per version, so CI wall time is a few minutes instead of the serial sum. To add a future release, run `fetch_cwe.py --versions <new-version>` or pass it to `build_all.py --only <new-version>`; the downloader will pick it up.
+`build_all.py` calls the fetcher automatically for the selected versions, then builds `out/v<version>/` with a worker pool. The GitHub workflow goes further and runs one matrix job per version plus a separate `merged` job, so CI wall time is a few minutes instead of the serial sum. To add a future release, run `fetch_cwe.py --versions <new-version>` or pass it to `build_all.py --only <new-version>`; the downloader will pick it up.
 
 Manual single-version run:
 
@@ -191,4 +223,4 @@ python -I scripts/render_graphs.py out/v5.0
 python -I scripts/make_index.py out
 ```
 
-> Note: layout is in-process through pygraphviz. `dot` takes 1–4 seconds per graph and `sfdp` roughly 30–120 seconds per version, so a full local build with four workers is about 10–20 minutes; the CI matrix usually finishes in 5–8 minutes. Use `--jobs 1` for a serial run and `--no-sfdp` to skip the force-directed posters. If the bundled Graphviz lacks overlap removal, the renderer retries without `overlap=false`.
+> Note: layout is in-process through pygraphviz. `dot` takes 1–4 seconds per graph and `sfdp` roughly 30–120 seconds per version. A full 55-version local build with four workers is about 30–50 minutes; the CI matrix (55 jobs, up to 20 concurrent) usually finishes in 10–15 minutes. Use `--jobs 1` for a serial run and `--no-sfdp` to skip the force-directed posters. If the bundled Graphviz lacks overlap removal, the renderer retries without `overlap=false`.
