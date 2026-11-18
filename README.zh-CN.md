@@ -66,7 +66,7 @@ CWE 1.x–4.x 使用 **Category**；5.0 把同一层改名为 **Grouping**。解
 
 4.21 与 5.0 的 Weakness/边数相同；5.0 改变了 schema 命名空间，并把 category 改称 grouping。所有版本都是 DAG（0 环）。
 
-## 合并视图（4.0–5.0）
+## 合并视图（1.0–5.0）
 
 `data/merged/cwec_merged.xml` 把 55 个 catalog 合并成一份 XML；`out/merged/` 是基于这份 XML 生成的图：
 
@@ -83,6 +83,36 @@ python -I scripts/merge_versions.py --require-all   # 生成 data/merged/cwec_me
 ```
 
 完整运行 `build_all.py` 时会自动生成；加 `--no-merge` 可跳过。
+
+### 合并异构图
+
+`out/merged/heterogeneous/` 把弱点层次和 grouping 组织层放在同一张异构图里：
+
+- **1,422 个带类型的节点**：988 个弱点（按 Pillar / Class / Base / Variant /
+  Compound 着色）+ 434 个 grouping（六边形）。
+- **6,313 条带类型的边**：1,535 条 `ChildOf`（深蓝色实线）+
+  4,778 条 `Has_Member`（橙色虚线）。
+- 有 7 个编号同时是 weakness 和 grouping（CWE-100、192、227、295、398、
+  485、769），图中用 `w<id>` 和 `g<id>` 两个带类型节点分别表示。
+- Deprecated/Obsolete 条目使用虚线边框。
+- 生成两种布局：`cwe-heterogeneous-dot.svg`（分层，适合追踪父子路径）和
+  `cwe-heterogeneous-sfdp.svg`（紧凑总览）。sfdp 的 PNG 因尺寸过大被跳过，
+  请使用 SVG。
+- `cwe-heterogeneous-nodes.csv` / `cwe-heterogeneous-edges.csv` 是带类型的
+  节点/边表，`stats.json` 记录数量与布局耗时。
+
+该图由 `merge_versions.py`（因此也会由 `build_all.py`）在标准合并产物之后
+自动生成。也可以基于生成的 CSV 表手动构建：
+
+```bash
+python -I scripts/cwe_heterogeneous_graph.py \
+    --data-dir out/merged \
+    --out-dir out/merged/heterogeneous
+```
+
+`--layouts dot,sfdp` 选择布局（默认两种）；`merge_versions.py --no-sfdp`
+会让异构图只生成 `dot` 布局。GitHub workflow 的 `merged` job 会构建并校验
+这些产物后再上传 artifact、发布 release。
 
 ## 图的结构（CWE 5.0，View 1000）
 
@@ -134,6 +164,7 @@ cwe-graphs/
   data/v<version>/cwec_v<version>.xml(.zip)   原始 MITRE 数据
   out/index.html                              全版本矩阵
   out/merged/                                 由合并 catalog 生成的图
+  out/merged/heterogeneous/                   弱点 + grouping 全量异构图
   data/merged/cwec_merged.xml                 合并后的 CWE XML（1.0-5.0）
   out/v<version>/                             每个版本的完整产物
     index.html
@@ -153,6 +184,7 @@ cwe-graphs/
   scripts/make_index.py                       生成 HTML 索引
   scripts/build_all.py                        并行构建所有版本
   scripts/merge_versions.py                   合并 catalog 为单个 XML + 总图
+  scripts/cwe_heterogeneous_graph.py          弱点 + grouping 全量异构图
 ```
 
 ### 每个版本内的文件
@@ -211,6 +243,8 @@ python -I scripts/build_all.py --only 5.0       # 只构建一个版本
 python -I scripts/build_all.py --offline        # 只用本地数据，不联网
 python -I scripts/build_all.py --no-sfdp        # 跳过力导向总览（更快）
 python -I scripts/merge_versions.py --require-all  # 合并总图（也会自动生成）
+python -I scripts/cwe_heterogeneous_graph.py \
+    --data-dir out/merged --out-dir out/merged/heterogeneous  # 合并异构图
 ```
 
 `build_all.py` 会先为所选版本调用下载器，再用工作线程池并行生成 `out/v<version>/`。GitHub workflow 进一步采用每个版本一个 matrix job，并额外用一个 `merged` job 生成并集视图，CI 的实际耗时通常只需几分钟，而不是串行总和。将来 MITRE 发布新版本时，运行 `fetch_cwe.py --versions <新版本>`，或直接 `build_all.py --only <新版本>`，下载器会自动获取。

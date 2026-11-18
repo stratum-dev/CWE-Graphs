@@ -137,10 +137,35 @@ def version_index(vdir):
       <p class="viewer-note">Also: <a href="cwe-dag-overview.svg">cwe-dag-overview.svg</a> (pillars + direct children).</p>
       {viewer_js}"""
 
+    hetero_section = ""
     if merged:
         dag_note = ("Merged view: the union of every catalog. All ChildOf edges are shown "
                     "uniformly; node metadata comes from the newest catalog containing the entry. "
                     "Switch between the layered and force-directed layouts; open the SVG to zoom.")
+        hetero_dir = os.path.join(vdir, "heterogeneous")
+        hetero_stats_path = os.path.join(hetero_dir, "stats.json")
+        if os.path.exists(os.path.join(hetero_dir, "index.html")):
+            if os.path.exists(hetero_stats_path):
+                hs = load(hetero_stats_path)
+                h_nodes = hs.get("nodes", "")
+                h_edges = hs.get("edges", "")
+                h_edge_types = hs.get("edge_types", {})
+                h_desc = (f'{h_nodes} typed nodes and {h_edges} typed edges '
+                          f'({h_edge_types.get("ChildOf", 0)} ChildOf + '
+                          f'{h_edge_types.get("Has_Member", 0)} Has_Member)')
+            else:
+                h_desc = "weakness and grouping node types with ChildOf and Has_Member edges"
+            hetero_section = f"""
+  <section>
+    <h2>Heterogeneous graph <small>weaknesses + groupings</small></h2>
+    <p class="note">A single typed graph: {h_desc}. Weakness nodes are coloured by
+    abstraction, groupings are hexagons; ChildOf edges are solid dark blue and
+    Has_Member edges are dashed orange.</p>
+    <p class="note"><a href="heterogeneous/index.html">Open the heterogeneous graph →</a> ·
+    <a href="heterogeneous/cwe-heterogeneous-dot.svg">dot SVG</a> ·
+    <a href="heterogeneous/cwe-heterogeneous-sfdp.svg">sfdp SVG</a> ·
+    <a href="heterogeneous/stats.json">stats.json</a></p>
+  </section>"""
         merge_tile = (f'<div class="tile"><b>{stats["merge"]["version_count"]}</b>'
                       '<span>Source catalogs</span></div>')
         merge_note = ' Merge policy: <a href="MERGE.md">MERGE.md</a>.'
@@ -191,6 +216,7 @@ def version_index(vdir):
     <p class="note">{dag_note}</p>
     {full_graph}
   </section>
+  {hetero_section}
 
   <section>
     <h2>{subgraph_label} subgraphs <small>induced sub-DAGs rooted at each {subgraph_root}</small></h2>
@@ -252,6 +278,11 @@ def root_index(out_root):
     if os.path.exists(merged_stats):
         ms = load(merged_stats)
         md = ms["canonical_dag"]
+        hetero_link = ""
+        if os.path.exists(os.path.join(out_root, "merged", "heterogeneous",
+                                       "index.html")):
+            hetero_link = (' · <a href="merged/heterogeneous/index.html">'
+                           'Heterogeneous</a>')
         merged_row = (
             f'<tr style="background:#eef6fb"><td><a href="merged/index.html">'
             f'{esc(ms["source"]["cwe_version"])}</a></td>'
@@ -260,9 +291,12 @@ def root_index(out_root):
             f'<td>{md["nodes"]}</td><td>{md["edges"]}</td><td>{md["roots"]}</td>'
             f'<td>{md["max_depth"]}</td><td>{md["multi_parent_nodes"]}</td>'
             f'<td>{ms["entries"]["groupings"]} groupings</td>'
-            f'<td><a href="merged/cwe-dag-full.svg">SVG</a></td></tr>')
+            f'<td><a href="merged/cwe-dag-full.svg">SVG</a>{hetero_link}</td></tr>')
         merged_note = ('The highlighted row is the merged view: the union of all catalogs, '
                        'with every relationship shown uniformly. ')
+        if hetero_link:
+            merged_note += ('The merged heterogeneous graph (weaknesses + groupings, '
+                            'ChildOf + Has_Member edges) is linked from its Full DAG cell. ')
     else:
         merged_note = ""
 

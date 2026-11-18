@@ -22,7 +22,8 @@ Both complete-DAG layouts are produced by default: the layered `dot` graph
 (cwe-dag-full-sfdp.svg/.png). Pass --no-sfdp to skip the slow sfdp pass.
 
 When all catalogs are built (no --only), the union "merged" view is generated
-in out/merged/ as well. Pass --no-merge to skip it.
+in out/merged/ as well, including the full heterogeneous graph in
+out/merged/heterogeneous/. Pass --no-merge to skip it.
 """
 import concurrent.futures
 import importlib.util

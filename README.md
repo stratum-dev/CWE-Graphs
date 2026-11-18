@@ -66,7 +66,7 @@ Older series are fully supported and produce the same artifact set:
 
 4.21 and 5.0 carry the same weakness/edge counts; 5.0 changes the schema namespace and renames categories to groupings. Every version is a DAG (0 cycles).
 
-## Merged view (4.0–5.0)
+## Merged view (1.0–5.0)
 
 `data/merged/cwec_merged.xml` merges all 55 catalogs into a single catalog; `out/merged/` contains the graphs built from it:
 
@@ -83,6 +83,40 @@ python -I scripts/merge_versions.py --require-all   # writes data/merged/cwec_me
 ```
 
 A full `build_all.py` run generates it automatically; pass `--no-merge` to skip it.
+
+### Heterogeneous merged graph
+
+`out/merged/heterogeneous/` contains a single heterogeneous graph that combines
+the weakness hierarchy and the grouping layer:
+
+- **1,422 typed nodes**: 988 weaknesses (coloured by Pillar / Class / Base /
+  Variant / Compound) and 434 groupings (hexagons).
+- **6,313 typed edges**: 1,535 `ChildOf` relations (solid dark blue) and 4,778
+  `Has_Member` relations (dashed orange).
+- Seven IDs exist as both weakness and grouping (CWE-100, 192, 227, 295, 398,
+  485, 769); they are represented as separate typed nodes `w<id>` and `g<id>`.
+- Deprecated/obsolete entries use dashed node borders.
+- Two layouts are produced: `cwe-heterogeneous-dot.svg` (hierarchical, for
+  tracing parent/child paths) and `cwe-heterogeneous-sfdp.svg` (compact
+  overview). The sfdp PNG is skipped because Graphviz's cairo renderer cannot
+  handle its size; use the SVG.
+- `cwe-heterogeneous-nodes.csv` and `cwe-heterogeneous-edges.csv` contain the
+  typed node/edge tables; `stats.json` records counts and layout times.
+
+The graph is generated automatically by `merge_versions.py` (and therefore by
+`build_all.py`) after the standard merged artifacts. To build it manually from
+the generated CSV tables:
+
+```bash
+python -I scripts/cwe_heterogeneous_graph.py \
+    --data-dir out/merged \
+    --out-dir out/merged/heterogeneous
+```
+
+`--layouts dot,sfdp` selects layouts (default both), and `--no-sfdp` on
+`merge_versions.py` limits the heterogeneous build to the `dot` layout. The
+GitHub workflow's `merged` job builds and verifies these artifacts before
+uploading them and publishing the release.
 
 ## Graph structure (CWE 5.0, View 1000)
 
@@ -134,6 +168,7 @@ cwe-graphs/
   data/v<version>/cwec_v<version>.xml(.zip)   raw MITRE catalogs
   out/index.html                              all-version matrix
   out/merged/                                 graphs built from the merged catalog
+  out/merged/heterogeneous/                   full weakness + grouping heterogeneous graph
   data/merged/cwec_merged.xml                 merged CWE XML (1.0-5.0)
   out/v<version>/                             one complete artifact set
     index.html
@@ -153,6 +188,7 @@ cwe-graphs/
   scripts/make_index.py                       HTML indexes
   scripts/build_all.py                        parallel build over all versions
   scripts/merge_versions.py                   merge catalogs into one XML + total graph
+  scripts/cwe_heterogeneous_graph.py          full weakness + grouping heterogeneous graph
 ```
 
 ### Per-version files
@@ -211,6 +247,8 @@ python -I scripts/build_all.py --only 5.0       # one version
 python -I scripts/build_all.py --offline        # use local data only, no network
 python -I scripts/build_all.py --no-sfdp        # skip force-directed posters (faster)
 python -I scripts/merge_versions.py --require-all  # merged union view (also automatic)
+python -I scripts/cwe_heterogeneous_graph.py \
+    --data-dir out/merged --out-dir out/merged/heterogeneous  # heterogeneous graph
 ```
 
 `build_all.py` calls the fetcher automatically for the selected versions, then builds `out/v<version>/` with a worker pool. The GitHub workflow goes further and runs one matrix job per version plus a separate `merged` job, so CI wall time is a few minutes instead of the serial sum. To add a future release, run `fetch_cwe.py --versions <new-version>` or pass it to `build_all.py --only <new-version>`; the downloader will pick it up.

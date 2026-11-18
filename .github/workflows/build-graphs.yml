@@ -108,6 +108,13 @@ jobs:
       - name: Build merged 1.0-5.0 view
         run: python -I scripts/merge_versions.py --require-all
 
+      - name: Verify heterogeneous merged graph
+        run: |
+          test -f out/merged/heterogeneous/index.html
+          test -f out/merged/heterogeneous/cwe-heterogeneous-dot.svg
+          test -f out/merged/heterogeneous/cwe-heterogeneous-sfdp.svg
+          echo "heterogeneous merged graph artifacts present"
+
       - name: Upload merged build
         uses: actions/upload-artifact@v4
         with:
@@ -176,7 +183,9 @@ jobs:
 
             Includes every fetched catalog (CWE 1.0–5.0, 55 catalogs): complete
             layered and force-directed DAGs, per-pillar/top-level subgraphs, and CSV/JSON data.
-            The merged union view is under `out/merged/` (historical-only edges dashed).
+            The merged union view is under `out/merged/`; `out/merged/heterogeneous/`
+            contains the full heterogeneous graph with weakness/grouping node types and
+            ChildOf/Has_Member edge types.
           files: cwe-graphs.zip
           make_latest: true
           token: ${{ secrets.GITHUB_TOKEN }}
